@@ -186,9 +186,9 @@ log.debug("结果是:{}", result);
   - ```java
      while(true) { 
        try {
-    			Thread.sleep(50);
-    		} catch (InterruptedException e) {
-    			e.printStackTrace(); 
+      			Thread.sleep(50);
+      		} catch (InterruptedException e) {
+      			e.printStackTrace(); 
        }
     }
     ```
@@ -319,6 +319,7 @@ log.debug("结果是:{}", result);
     ```
 
 - 打断park线程
+  
   - 打断 park 线程, 不会清空打断状态
 
 #### **<font color="red">设计模式——两阶段终止</font>**
@@ -444,3 +445,358 @@ log.debug("结果是:{}", result);
 
 # 共享模型之管程
 
+## 临界区 Critical Section
+
+- 一段代码块，如果存在对共享资源的多线程读写操作，称这段代码块为临界区。
+
+## 竞态条件 Race Condition
+
+- 多个线程在临界区内执行，由于代码的执行序列不同而导致结果无法预测，称之为发生了竞态条件
+
+## 常见线程安全类
+
+- String
+- Integer
+- StringBuffer
+- Random
+- Vector
+- Hashtable java.util.concurrent 包下的类
+
+## synchronized 解决方案
+
+- 为了避免临界区的竞态条件发生，有多种手段可以达到目的。
+  - 阻塞式的解决方案:synchronized，Lock 
+  - 非阻塞式的解决方案:原子变量
+
+### synchronized语法
+
+```java
+synchronized(对象) // 线程1， 线程2(blocked) {
+		临界区
+}
+```
+
+- sample
+
+  ```java
+  static int counter = 0;
+  static final Object room = new Object();
+  public static void main(String[] args) throws InterruptedException { 
+    Thread t1 = new Thread(() -> {
+  		for (int i = 0; i < 5000; i++) { 
+        synchronized (room) {
+  				counter++; 
+        }
+  		}
+  	}, "t1");
+  	Thread t2 = new Thread(() -> {
+  		for (int i = 0; i < 5000; i++) {
+  			synchronized (room) { 
+          counter--;
+  			} 
+    	}
+  	}, "t2");
+  	t1.start();
+  	t2.start();
+  	t1.join();
+  	t2.join(); log.debug("{}",counter);
+  }
+  ```
+  - 如果把 synchronized(obj) 放在 for 循环的外面，如何理解?
+  - 如果 t1 synchronized(obj1) 而 t2 synchronized(obj2) 会怎样运作?
+  - 如果 t1 synchronized(obj) 而 t2 没有加会怎么样?如何理解?
+
+- 面向对象优化
+
+  - ```java
+    class Room {
+    	int value = 0;
+    	public void increment() { 
+        synchronized (this) {
+    				value++; 
+        }
+    	}
+    	public void decrement() { 
+        synchronized (this) {
+    			value--; 
+        }
+    	}
+      public int get() { 
+        synchronized (this) {
+    			return value; 
+        }
+    	} 
+    }
+    
+    @Slf4j
+    public class Test1 {
+    	public static void main(String[] args) throws InterruptedException { 
+        Room room = new Room();
+    		Thread t1 = new Thread(() -> {
+    			for (int j = 0; j < 5000; j++) { 
+            room.increment();
+          }
+    		}, "t1");
+    		Thread t2 = new Thread(() -> {
+    			for (int j = 0; j < 5000; j++) {
+    				room.decrement(); 
+       	 }
+    		}, "t2"); 
+      	t1.start(); 
+        t2.start();
+    		t1.join();
+    		t2.join();
+    		log.debug("count: {}" , room.get());
+    	} 
+    }
+    ```
+
+- 方法上的synchronized
+
+  - ```java
+    class Test{
+    	public synchronized void test() {
+    	} 
+    }
+    // 等价于
+    class Test{
+    	public void test() {
+    	synchronized(this) { }
+    	} 
+    }
+    ```
+
+  - ```java
+    class Test{
+    	public synchronized static void test() {
+    	} 
+    }
+    //等价于
+    class Test{
+    	public static void test() {
+    		synchronized(Test.class) { }
+    	} 
+    }
+    ```
+
+### synchronized原理
+
+#### Java对象头
+
+- 普通对象
+
+  ```
+   |--------------------------------------------------------------| 
+   | 												Object Header (64 bits) 							| 
+   |------------------------------------|-------------------------| 
+   | Mark Word (32 bits)							 	| 	Klass Word (32 bits)  | 
+   |------------------------------------|-------------------------|
+  ```
+  - Klass指针指向了类对象
+
+- 数组对象
+
+  ```
+   |---------------------------------------------------------------------------------| 
+   | 																Object Header (96 bits) 												 | 
+   |--------------------------------|-----------------------|------------------------| 
+   | Mark Word(32bits)						 	| Klass Word(32bits) 		| array length(32bits) 	 | 
+   |--------------------------------|-----------------------|------------------------|
+  ```
+
+- Mark Word 结构为
+
+  ```
+  |-------------------------------------------------------|--------------------| 
+  | Mark Word (32 bits) 																	| 						 State | 
+  |-------------------------------------------------------|--------------------| 
+  | hashcode:25 | age:4 | biased_lock:0 | 01 							| Normal 						 | 
+  |-------------------------------------------------------|--------------------| 
+  | thread:23 | epoch:2 | age:4 | biased_lock:1 | 01 			| Biased 						 | 
+  |-------------------------------------------------------|--------------------| 
+  | ptr_to_lock_record:30 | 00 														| Lightweight Locked | 
+  |-------------------------------------------------------|--------------------| 
+  | ptr_to_heavyweight_monitor:30 | 10 										| Heavyweight Locked | 
+  |-------------------------------------------------------|--------------------| 
+  | 																									|11 | MarkedforGC 	 		 |		 
+  |-------------------------------------------------------|--------------------|
+  ```
+
+  - 01表示normal或者开了偏向锁（再往前看一位，区别是否开启偏向锁）
+  - 10表示中重量锁
+  - 00表示轻量锁
+
+#### Monitor锁/管程
+
+- 每个 Java 对象都可以关联一个 Monitor 对象，如果使用 synchronized 给对象上锁(重量级)之后，该对象头的
+
+  Mark Word 中就被设置指向 Monitor 对象的指针
+
+  ![image-20210304150022244](/Users/i531515/Library/Application Support/typora-user-images/image-20210304150022244.png)
+
+- synchronized 的对象中的对象头，最后两位状态下01变10，并且ptr_to_heavyweight_monitor设置成指向monitor的指针
+- 刚开始 Monitor 中 Owner 为 null
+- 当 Thread-2 执行 synchronized(obj) ，先检查obj有没有关联monitor，就会将 Monitor 的所有者 Owner 置为 Thread-2，Monitor中只能有一 个 Owner
+- 在 Thread-2 上锁的过程中，如果 Thread-3，Thread-4，Thread-5 也来执行 synchronized(obj)，就会进入 EntryList BLOCKED
+- Thread-2 执行完同步代码块的内容，然后唤醒 EntryList 中等待的线程来竞争锁，竞争的时是非公平的
+- 图中 WaitSet 中的 Thread-0，Thread-1 是之前获得过锁，但条件不满足进入 WAITING 状态的线程，后面讲 wait-notify 时会分析
+- synchronized 必须是进入同一个对象的 monitor 才有上述的效果
+- 不加 synchronized 的对象不会关联监视器，不遵从以上规则
+
+### synchronized 原理进阶
+
+#### 轻量级锁
+
+- 为什么要使用轻量级锁？
+  - 因为重量级锁要用到OS提供的monitor，开销大
+
+- 使用场景
+
+  - 如果一个对象虽然有多线程要加锁，但是加锁时间是错开的（没有竞争），那么就可以用加轻量级锁。
+  - 轻量级锁对使用者是透明的，即语法仍然是 synchronized
+
+- sample
+
+  - ```java
+    static final Object obj = new Object(); 
+    public static void method1() {
+    	synchronized( obj ) { 
+        // 同步块 A
+    		method2(); 
+      }
+    }
+    public static void method2() {
+      synchronized( obj ) { 
+        // 同步块 B
+    	} 
+    }
+    ```
+
+- 创建锁记录(Lock Record)对象，每个线程都的栈帧都会包含一个锁记录的结构，内部可以存储锁定对象的 Mark Word
+
+  - ![image-20210304152745695](/Users/i531515/Library/Application Support/typora-user-images/image-20210304152745695.png)
+
+- 让锁记录中 Object reference 指向锁对象，并尝试用 cas 替换 Object 的 Mark Word，将 Mark Word 的值存 入锁记录
+  - ![image-20210304152857478](/Users/i531515/Library/Application Support/typora-user-images/image-20210304152857478.png)
+
+- 如果 cas 替换成功，对象头中存储了 锁记录地址和状态 00（表示轻量级锁） ，表示由该线程给对象加锁，这时图示如下
+  - ![image-20210304152954795](/Users/i531515/Library/Application Support/typora-user-images/image-20210304152954795.png)
+
+- 如果 cas 失败，有两种情况
+  - 如果是其它线程已经持有了该 Object 的轻量级锁，这时表明有竞争，进入锁膨胀过程
+  - 如果是自己执行了 synchronized 锁重入，那么再添加一条 Lock Record 作为重入的计数
+    - ![image-20210304153030297](/Users/i531515/Library/Application Support/typora-user-images/image-20210304153030297.png)
+- 当退出 synchronized 代码块(解锁时)如果有取值为 null 的锁记录，表示有重入，这时重置锁记录，表示重 入计数减一
+  - ![image-20210304153108639](/Users/i531515/Library/Application Support/typora-user-images/image-20210304153108639.png)
+
+- 当退出 synchronized 代码块(解锁时)锁记录的值不为 null，这时使用 cas 将 Mark Word 的值恢复给对象 头
+  - 成功，解锁成功
+  - 失败，说明轻量级锁进行了锁膨胀或已经升级为重量级锁，进入重量级锁解锁流程
+
+#### 锁膨胀
+
+- 将轻量级锁升级成重量级锁
+- 如果在尝试加轻量级锁的过程中，CAS 操作无法成功，这时一种情况就是有其它线程为此对象加上了轻量级锁(有竞争)，这时需要进行锁膨胀，将轻量级锁变为重量级锁。
+
+- 当 Thread-1 进行轻量级加锁时，Thread-0 已经对该对象加了轻量级锁
+
+  ![image-20210304154413229](/Users/i531515/Library/Application Support/typora-user-images/image-20210304154413229.png)
+
+- 这时 Thread-1 加轻量级锁失败，进入锁膨胀流程
+  - 即为 Object 对象申请 Monitor 锁，让 Object 指向重量级锁地址
+  - 然后自己进入 Monitor 的 EntryList BLOCKED，将owner设置成thread0
+  - ![image-20210304154629181](/Users/i531515/Library/Application Support/typora-user-images/image-20210304154629181.png)
+
+- 当 Thread-0 退出同步块解锁时，使用 cas 将 Mark Word 的值恢复给对象头，失败。这时会进入重量级解锁 流程，即按照 Monitor 地址找到 Monitor 对象，设置 Owner 为 null，唤醒 EntryList 中 BLOCKED 线程
+
+#### 自旋优化
+
+- **多核CPU下才能进行**
+
+- **重量级**锁竞争的时候，还可以使用自旋来进行优化，如果当前线程自旋成功(即这时候持锁线程已经退出了同步块，释放了锁)，这时当前线程就可以避免阻塞。（为什么要避免阻塞？阻塞需要上下文切换，代价比较大）
+
+  - 成功情况
+    - ![image-20210304155225756](/Users/i531515/Library/Application Support/typora-user-images/image-20210304155225756.png)
+
+  - 失败情况
+    - ![image-20210304155333932](/Users/i531515/Library/Application Support/typora-user-images/image-20210304155333932.png)
+
+  - 在 Java 6 之后自旋锁是自适应的，比如对象刚刚的一次自旋操作成功过，那么认为这次自旋成功的可能性会 高，就多自旋几次;反之，就少自旋甚至不自旋，总之，比较智能。
+    - Java 7 之后不能控制是否开启自旋功能
+
+#### 偏向锁
+
+- 轻量级锁的缺点：执行锁重入时，仍然需要CAS操作
+
+- Java 6 中引入了偏向锁来做进一步优化:只有第一次使用 CAS 将线程 ID 设置到对象的 Mark Word 头，之后发现 这个线程 ID 是自己的就表示没有竞争，不用重新 CAS。以后只要不发生竞争，这个对象就归该线程所有
+
+  - ![image-20210304160725423](/Users/i531515/Library/Application Support/typora-user-images/image-20210304160725423.png)
+
+  - ![image-20210304160744636](/Users/i531515/Library/Application Support/typora-user-images/image-20210304160744636.png)
+
+- ```
+  |-------------------------------------------------------|--------------------| 
+  | Mark Word (32 bits) 																	| 						 State | 
+  |-------------------------------------------------------|--------------------| 
+  | hashcode:25 | age:4 | biased_lock:0 | 01 							| Normal 						 | 
+  |-------------------------------------------------------|--------------------| 
+  | thread:23 | epoch:2 | age:4 | biased_lock:1 | 01 			| Biased 						 | 
+  |-------------------------------------------------------|--------------------| 
+  | ptr_to_lock_record:30 | 00 														| Lightweight Locked | 
+  |-------------------------------------------------------|--------------------| 
+  | ptr_to_heavyweight_monitor:30 | 10 										| Heavyweight Locked | 
+  |-------------------------------------------------------|--------------------| 
+  | 																									|11 | MarkedforGC 	 		 |		 
+  |-------------------------------------------------------|--------------------|
+  ```
+
+  - 如果开启了偏向锁(默认开启)，那么对象创建后，markword 值为 0x05 即最后 3 位为 101，这时它的 thread、epoch、age 都为 0
+  - 偏向锁是默认是延迟的，不会在程序启动时立即生效，如果想避免延迟，可以加VM参数 - XX:BiasedLockingStartupDelay=0 来禁用延迟
+  - 如果没有开启偏向锁，那么对象创建后，markword 值为 0x01 即最后 3 位为 001，这时它的 hashcode、 age 都为 0，第一次用到 hashcode 时才会赋值
+
+- 撤销
+
+  - 调用对象 hashCode
+    - 调用了对象的 hashCode，但偏向锁的对象 MarkWord 中存储的是线程 id，如果调用 hashCode 会导致偏向锁被撤销（因为存不下了）
+      - 轻量级锁会在锁记录中记录 hashCode
+      - 重量级锁会在 Monitor 中记录 hashCode
+
+  - 其它线程使用对象
+    - 当有其它线程使用偏向锁对象时，会将偏向锁升级为轻量级锁
+  - wait/notify
+
+- 批量重定向
+
+  - **如果对象虽然被多个线程访问，但没有竞争，**这时偏向了线程 T1 的对象仍有机会重新偏向 T2，重偏向会重置对象的 Thread ID
+
+  - 当撤销偏向锁阈值超过 20 次后，jvm 会这样觉得，我是不是偏向错了呢，于是会在给这些对象加锁时重新偏向至加锁线程
+
+  - 当撤销偏向锁阈值超过 40 次后，jvm 会这样觉得，自己确实偏向错了，根本就不该偏向。于是整个类的所有对象 都会变为不可偏向的，新建的对象也是不可偏向的
+
+#### 锁消除
+
+- sample
+
+  ```java
+  @Fork(1) 
+  @BenchmarkMode(Mode.AverageTime) 
+  @Warmup(iterations=3) 
+  @Measurement(iterations=5) 
+  @OutputTimeUnit(TimeUnit.NANOSECONDS) 
+  public class MyBenchmark {
+  	static int x = 0;
+  	@Benchmark
+  	public void a() throws Exception {
+  		x++; 
+    }
+  	@Benchmark
+  	public void b() throws Exception { 
+      Object o = new Object(); 
+      synchronized (o) {
+  			x++;
+  		} 
+    }
+  }
+  ```
+
+- JIT即使编译，发现了o是局部变量，不会发生资源竞争和共享，所以位自动优化消除锁
