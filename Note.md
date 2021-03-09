@@ -186,9 +186,9 @@ log.debug("结果是:{}", result);
   - ```java
      while(true) { 
        try {
-    			Thread.sleep(50);
-    		} catch (InterruptedException e) {
-    			e.printStackTrace(); 
+      			Thread.sleep(50);
+      		} catch (InterruptedException e) {
+      			e.printStackTrace(); 
        }
     }
     ```
@@ -319,6 +319,7 @@ log.debug("结果是:{}", result);
     ```
 
 - 打断park线程
+  
   - 打断 park 线程, 不会清空打断状态
 
 #### **<font color="red">设计模式——两阶段终止</font>**
@@ -440,7 +441,74 @@ log.debug("结果是:{}", result);
   **【可运行状态】、【运行状态】和【阻塞状态】(由于 BIO 导致的线程阻塞，在 Java 里无法区分，仍然认为是可运行)**
 
 - BLOCKED ， WAITING(join) ， TIMED_WAITING(sleep) 都是 Java API 层面对【阻塞状态】的细分，后面会在状态转换一节详述
+
 - TERMINATED 当线程代码运行结束
+
+- 状态转换过程
+
+  1. new->start: 调用start方法
+  2. runnable->waiting: 
+     - synchronzied对象如果拥有锁时，调用wait方法，自动从runnable到waiting
+     - **当前线程**调用t.join()方法，**当前线程**waiting
+     - 调用lock support 方法
+  3. waiting->runnable
+     - entrySet 中的线程，被notify了，并且和阻塞队列中的其他资源竞争成功了
+     - t线程运行结束，或者调用了**当前线程**的interrupt()方法
+     - 调用unpark方法
+  4. waiting->timed runnable
+     - 比到runnable多了sleep方法
 
 # 共享模型之管程
 
+
+
+
+
+## wait&notify
+
+### sleep和wait的不同
+
+- sleep是thread的方法，wait是object的方法
+- sleep不需要配合synchronized使用，wait需要配合synchronized使用
+- sleep在睡眠的时候不需要释放对象锁，wait需要
+
+### sleep和wait的相同
+
+- 进入的状态相同，都是timed_wait状态
+
+### 设计模式——同步模式之保护性暂停
+
+- Guarded Suspension
+- 有一个结果需要从一个线程传递到另一个线程，让他们关联同一个 GuardedObject
+- 如果有结果不断从一个线程到另一个线程那么可以使用消息队列(见生产者/消费者)
+- JDK 中，join 的实现、Future 的实现，采用的就是此模式
+- 因为要等待另一方的结果，因此归类到同步模式
+- ![](https://i.bmp.ovh/imgs/2021/03/260131d93b1f6236.png)
+
+- ```java
+  class GuardedObject { 
+    private Object response;
+  	private final Object lock = new Object();
+  	public Object get() { 
+      synchronized (lock) { // 条件不满足则等待
+  			while (response == null) { 
+          try {
+  					lock.wait();
+  				} catch (InterruptedException e) {
+  					e.printStackTrace(); 
+          }
+  			}
+  			return response;
+  		}
+   	}
+  	public void complete(Object response) { 
+      synchronized (lock) {
+  			// 条件满足，通知等待线程 
+        this.response = response; 
+        lock.notifyAll();
+  		} 
+    }
+  }
+  ```
+
+## ReEntrantLock
