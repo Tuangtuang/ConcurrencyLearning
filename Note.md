@@ -460,10 +460,6 @@ log.debug("结果是:{}", result);
 
 # 共享模型之管程
 
-
-
-
-
 ## 临界区 Critical Section
 
 - 一段代码块，如果存在对共享资源的多线程读写操作，称这段代码块为临界区。
@@ -667,8 +663,9 @@ synchronized(对象) // 线程1， 线程2(blocked) {
 #### 轻量级锁
 
 - 为什么要使用轻量级锁？
-  - 因为重量级锁要用到OS提供的monitor，开销大
-
+  
+- 因为重量级锁要用到OS提供的monitor，开销大
+  
 - 使用场景
 
   - 如果一个对象虽然有多线程要加锁，但是加锁时间是错开的（没有竞争），那么就可以用加轻量级锁。
@@ -696,18 +693,21 @@ synchronized(对象) // 线程1， 线程2(blocked) {
   - ![image-20210304152745695](/Users/i531515/Library/Application Support/typora-user-images/image-20210304152745695.png)
 
 - 让锁记录中 Object reference 指向锁对象，并尝试用 cas 替换 Object 的 Mark Word，将 Mark Word 的值存 入锁记录
-  - ![image-20210304152857478](/Users/i531515/Library/Application Support/typora-user-images/image-20210304152857478.png)
-
+  
+- ![image-20210304152857478](/Users/i531515/Library/Application Support/typora-user-images/image-20210304152857478.png)
+  
 - 如果 cas 替换成功，对象头中存储了 锁记录地址和状态 00（表示轻量级锁） ，表示由该线程给对象加锁，这时图示如下
-  - ![image-20210304152954795](/Users/i531515/Library/Application Support/typora-user-images/image-20210304152954795.png)
-
+  
+- ![image-20210304152954795](/Users/i531515/Library/Application Support/typora-user-images/image-20210304152954795.png)
+  
 - 如果 cas 失败，有两种情况
   - 如果是其它线程已经持有了该 Object 的轻量级锁，这时表明有竞争，进入锁膨胀过程
   - 如果是自己执行了 synchronized 锁重入，那么再添加一条 Lock Record 作为重入的计数
     - ![image-20210304153030297](/Users/i531515/Library/Application Support/typora-user-images/image-20210304153030297.png)
 - 当退出 synchronized 代码块(解锁时)如果有取值为 null 的锁记录，表示有重入，这时重置锁记录，表示重 入计数减一
-  - ![image-20210304153108639](/Users/i531515/Library/Application Support/typora-user-images/image-20210304153108639.png)
-
+  
+- ![image-20210304153108639](/Users/i531515/Library/Application Support/typora-user-images/image-20210304153108639.png)
+  
 - 当退出 synchronized 代码块(解锁时)锁记录的值不为 null，这时使用 cas 将 Mark Word 的值恢复给对象 头
   - 成功，解锁成功
   - 失败，说明轻量级锁进行了锁膨胀或已经升级为重量级锁，进入重量级锁解锁流程
@@ -869,4 +869,152 @@ synchronized(对象) // 线程1， 线程2(blocked) {
   }
   ```
 
-## ReEntrantLock
+## ReEntrantLock VS Synchronize
+
+- Reentrantlock相比synchronize有如下特点
+
+  - 可中断
+
+    - 在等待锁的过程中可以被打断，会抛出异常
+
+  - 可设置超时时间
+
+  - 可设置为公平锁
+
+  - 支持多个条件变量
+
+    - synchronized 中也有条件变量，就是我们讲原理时那个 waitSet 休息室，当条件不满足时进入 waitSet 等待 ReentrantLock 的条件变量比 synchronized 强大之处在于，它是**支持多个条件变量**的，这就好比
+
+      - synchronized 是那些不满足条件的线程都在一间休息室等消息，而 ReentrantLock 支持多间休息室，有专门等烟的休息室、专门等早餐的休息室、唤醒时也是按休息室来唤 醒
+
+      - 使用要点:
+        - await 前需要获得锁
+        - await 执行后，会释放锁，进入 conditionObject 等待 await 的线程被唤醒(或打断、或超时)取重新竞争 lock 锁 竞争 lock 锁成功后，从 await 后继续执行
+
+- 和synchronized一样都支持重入
+
+# 共享模型之volatile
+
+## Java内存模型
+
+- JMM 即 Java Memory Model，它定义了主存、工作内存抽象概念，底层对应着 CPU 寄存器、缓存、硬件内存、 CPU 指令优化等。
+
+- JMM 体现在以下几个方面
+  - 原子性 - 保证指令不会受到线程上下文切换的影响 
+  - 可见性 - 保证指令不会受 cpu 缓存的影响
+  - 有序性 - 保证指令不会受 cpu 指令并行优化的影响
+
+## Volatile
+
+- 补充
+- 
+
+# 共享模型之无锁
+
+## CAS
+
+- compare and set
+  - ![image-20210310103336920](/Users/i531515/Library/Application Support/typora-user-images/image-20210310103336920.png)
+  - 其实 CAS 的底层是 lock cmpxchg 指令(X86 架构)，在单核 CPU 和多核 CPU 下都能够保证【比较-交 换】的原子性。
+
+## CAS和Volatile
+
+- 获取共享变量时，为了保证该变量的可见性，需要使用 volatile 修饰。它可以用来修饰成员变量和静态成员变量，他可以避免线程从自己的工作缓存中查找变量的值，必须到主存中获取 它的值，线程操作 volatile 变量都是直接操作主存。即一个线程对 volatile 变量的修改，对另一个线程可见。
+
+- volatile 仅仅保证了共享变量的可见性，让其它线程能够看到最新值，但不能解决指令交错问题(不能保证原子性)
+
+- CAS 必须借助 volatile 才能读取到共享变量的最新值来实现【比较并交换】的效果
+
+## 为什么无锁并发效率高
+
+- 无锁情况下，即使重试失败，线程始终在高速运行，没有停歇，而 synchronized 会让线程在没有获得锁的时候，发生上下文切换，进入阻塞。
+- 但无锁情况下，因为线程要保持运行，需要额外 CPU 的支持，CPU 在这里就好比高速跑道，没有额外的跑道，线程想高速运行也无从谈起，虽然不会进入阻塞，但由于没有分到时间片，仍然会进入可运行状态，还会导致上下文切换。
+
+## CAS 的特点
+
+- 结合 CAS 和 volatile 可以实现无锁并发，适用于**线程数少、多核 CPU** 的场景下。
+- CAS 是基于**乐观锁**的思想:最乐观的估计，不怕别的线程来修改共享变量，就算改了也没关系，我吃亏点再重试呗。
+
+- synchronized 是基于**悲观锁**的思想:最悲观的估计，得防着其它线程来修改共享变量，我上了锁你们都别想 改，我改完了解开锁，你们才有机会。
+
+- CAS 体现的是无锁并发、无阻塞并发，请仔细体会这两句话的意思
+
+- 因为没有使用 synchronized，所以线程不会陷入阻塞，这是效率提升的因素之一 但如果竞争激烈，可以想到重试必然频繁发生，反而效率会受影响
+
+# 不可变对象
+
+## Final关键字
+
+### 设置final原理
+
+- ```java
+    public class TestFinal { 
+      final int a = 20;
+  	}
+  ```
+
+- ```
+  0: aload_0
+  1: invokespecial #1 
+  4: aload_0
+  5: bipush 20 
+  7: putfield #2
+  <-- 写屏障 
+  10: return
+  ```
+
+- 写屏障保证了之前的指令不会在写屏障之后执行
+
+- 保证了其他线程对变量的可见性，保证在其它线程读到 它的值时不会出现为 0 的情况（初始化之前变量是0）
+
+# JUC
+
+## ThreadPoolExecutor
+
+![image-20210310104733209](/Users/i531515/Library/Application Support/typora-user-images/image-20210310104733209.png)
+
+### 线程池状态
+
+- ThreadPoolExecutor 使用 int 的高 3 位来表示线程池状态，低 29 位表示线程数量
+- ![image-20210310113652758](/Users/i531515/Library/Application Support/typora-user-images/image-20210310113652758.png)
+
+- 从数字上比较，TERMINATED > TIDYING > STOP > SHUTDOWN > RUNNING
+
+- 这些信息存储在一个原子变量 ctl 中，目的是将线程池状态与线程个数合二为一，**这样就可以用一次 cas 原子操作**
+
+  **进行赋值**
+
+### 构造方法
+
+```java
+public ThreadPoolExecutor(int corePoolSize, 
+                          int maximumPoolSize,
+													long keepAliveTime,
+													TimeUnit unit, 
+                          BlockingQueue<Runnable> workQueue, 
+                          ThreadFactory threadFactory, 
+                          RejectedExecutionHandler handler)
+```
+
+- corePoolSize 核心线程数目 (最多保留的线程数) 
+- maximumPoolSize 最大线程数目 
+- keepAliveTime 生存时间 - 针对救急线程
+- unit 时间单位 - 针对救急线程
+- workQueue 阻塞队列
+- threadFactory 线程工厂 - 可以为线程创建时起个好名字 
+- handler 拒绝策略
+
+### 工作方式
+
+- 线程池中刚开始没有线程，当一个任务提交给线程池之后，线程池会创建一个新线程来执行任务。
+- 当线程数达到corePoolSize 并没有线程空闲，这时再加入任务，新加的任务会被加入workQueue 队列排队，直到有空闲的线程。
+- 如果队列选择了有界队列，那么任务超过了队列大小时，会创建 maximumPoolSize - corePoolSize 数目的线程来救急。
+- 如果线程到达 maximumPoolSize 仍然有新任务这时会执行拒绝策略。拒绝策略 jdk 提供了 4 种实现：
+  - AbortPolicy 让调用者抛出 RejectedExecutionException 异常，这是默认策略
+  - CallerRunsPolicy 让调用者运行任务
+  - DiscardPolicy 放弃本次任务
+  - DiscardOldestPolicy 放弃队列中最早的任务，本任务取而代之
+
+- 当高峰过去后，超过corePoolSize 的救急线程如果一段时间没有任务做，需要结束节省资源，这个时间由 keepAliveTime 和 unit 来控制。
+- 根据这个构造方法，JDK Executors 类中提供了众多工厂方法来创建各种用途的线程池
+  - ![image-20210310131845470](/Users/i531515/Library/Application Support/typora-user-images/image-20210310131845470.png)
