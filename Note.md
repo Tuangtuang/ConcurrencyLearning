@@ -950,7 +950,7 @@ synchronized(对象) // 线程1， 线程2(blocked) {
 - ```java
     public class TestFinal { 
       final int a = 20;
-  	}
+    	}
   ```
 
 - ```
@@ -967,13 +967,11 @@ synchronized(对象) // 线程1， 线程2(blocked) {
 
 - 保证了其他线程对变量的可见性，保证在其它线程读到 它的值时不会出现为 0 的情况（初始化之前变量是0）
 
-# JUC
-
-## ThreadPoolExecutor
+# ThreadPoolExecutor
 
 ![image-20210310104733209](/Users/i531515/Library/Application Support/typora-user-images/image-20210310104733209.png)
 
-### 线程池状态
+## 线程池状态
 
 - ThreadPoolExecutor 使用 int 的高 3 位来表示线程池状态，低 29 位表示线程数量
 - ![image-20210310113652758](/Users/i531515/Library/Application Support/typora-user-images/image-20210310113652758.png)
@@ -984,7 +982,7 @@ synchronized(对象) // 线程1， 线程2(blocked) {
 
   **进行赋值**
 
-### 构造方法
+## 构造方法
 
 ```java
 public ThreadPoolExecutor(int corePoolSize, 
@@ -1004,7 +1002,7 @@ public ThreadPoolExecutor(int corePoolSize,
 - threadFactory 线程工厂 - 可以为线程创建时起个好名字 
 - handler 拒绝策略
 
-### 工作方式
+## 工作方式
 
 - 线程池中刚开始没有线程，当一个任务提交给线程池之后，线程池会创建一个新线程来执行任务。
 - 当线程数达到corePoolSize 并没有线程空闲，这时再加入任务，新加的任务会被加入workQueue 队列排队，直到有空闲的线程。
@@ -1018,3 +1016,228 @@ public ThreadPoolExecutor(int corePoolSize,
 - 当高峰过去后，超过corePoolSize 的救急线程如果一段时间没有任务做，需要结束节省资源，这个时间由 keepAliveTime 和 unit 来控制。
 - 根据这个构造方法，JDK Executors 类中提供了众多工厂方法来创建各种用途的线程池
   - ![image-20210310131845470](/Users/i531515/Library/Application Support/typora-user-images/image-20210310131845470.png)
+
+## 四种线程池
+
+- newFixedThreadPool
+
+  - ```java
+    public static ExecutorService newFixedThreadPool(int nThreads) { 
+    	return new ThreadPoolExecutor(nThreads, nThreads, 0L, TimeUnit.MILLISECONDS,new LinkedBlockingQueue<Runnable>());
+    }
+    ```
+
+  - **核心线程数 == 最大线程数(没有救急线程被创建)**，因此也无需超时时间
+
+  - 阻塞队列是无界的，可以放任意数量的任务
+
+  - 适用于任务量已知，相对耗时的任务
+
+- newCachedThreadPool
+
+  - ```java
+    public static ExecutorService newCachedThreadPool() { 
+    	return new ThreadPoolExecutor(0, Integer.MAX_VALUE,60L, TimeUnit.SECONDS,new SynchronousQueue<Runnable>());
+    }
+    ```
+
+  - **核心线程数是 0， 最大线程数是 Integer.MAX_VALUE**，救急线程的空闲生存时间是 60s，意味着
+
+    - 全部都是救急线程(60s 后可以回收)
+
+    - 救急线程可以无限创建
+
+    - 队列采用了 **SynchronousQueue** 实现特点是，它**没有容量**，没有线程来取，任务是放不进去的(一手交钱、一手交货)
+
+    - ```java
+      SynchronousQueue<Integer> integers = new SynchronousQueue<>(); 
+      new Thread(() -> {
+      	try {
+      		log.debug("putting {} ", 1); 
+          integers.put(1); 
+          log.debug("{} putted...", 1);
+      		log.debug("putting...{} ", 2); 
+          integers.put(2);
+      		log.debug("{} putted...", 2);
+      	} catch (InterruptedException e) { 
+          e.printStackTrace();
+      	} 
+      },"t1").start();
+      sleep(1);
+      new Thread(() -> { 
+        try {
+      		log.debug("taking {}", 1);
+      		integers.take();
+      	} catch (InterruptedException e) {
+      		e.printStackTrace(); 
+        }
+      },"t2").start();
+      sleep(1);
+      new Thread(() -> { 
+        try {
+      		log.debug("taking {}", 2);
+      		integers.take();
+      	} catch (InterruptedException e) {
+      		e.printStackTrace(); }
+      },"t3").start();
+      ```
+
+    - ```
+      11:48:15.500 c.TestSynchronousQueue [t1] - putting 1 
+      11:48:16.500 c.TestSynchronousQueue [t2] - taking 1 
+      11:48:16.500 c.TestSynchronousQueue [t1] - 1 putted... 
+      11:48:16.500 c.TestSynchronousQueue [t1] - putting...2 
+      11:48:17.502 c.TestSynchronousQueue [t3] - taking 2 
+      11:48:17.503 c.TestSynchronousQueue [t1] - 2 putted...
+      ```
+
+    - 整个线程池表现为线程数会根据任务量不断增长，没有上限，当任务执行完毕，空闲 1分钟后释放线程。 **适合任务数比较密集，但每个任务执行时间较短的情况**
+
+- newSingleThreadExecutor
+
+  - ```java
+    public static ExecutorService newSingleThreadExecutor() { 
+     	return new FinalizableDelegatedExecutorService(new ThreadPoolExecutor(1, 1, 0L, 
+                                                                            TimeUnit.MILLISECONDS, 
+                                                                            new LinkedBlockingQueue<Runnable>()));
+    }
+    ```
+
+  - 希望多个任务排队执行。**线程数固定为 1**，**任务数多于 1 时，会放入无界队列排队**。任务执行完毕，这唯一的线程也不会被释放。
+
+  - 和自己创建单线程执行的区别：
+
+    - 自己创建单线程执行，如果失败没有任何补救措施，而线程池会新建一个线程，保证线程池的正常工作
+
+  - 和Executors.newFixedThreadPool(1) 的区别
+
+    - Executors.newSingleThreadExecutor() 线程个数始终为1，不能修改
+
+      - FinalizableDelegatedExecutorService 应用的是装饰器模式，只对外暴露了 ExecutorService 接口，因
+
+      此不能调用 ThreadPoolExecutor 中特有的方法
+
+    - Executors.newFixedThreadPool(1) 初始时为1，以后还可以修改
+      - 对外暴露的是 ThreadPoolExecutor 对象，可以强转后调用 setCorePoolSize 等方法进行修改
+
+- newScheduledThreadPool
+
+  - 在『任务调度线程池』功能加入之前，可以使用 java.util.Timer 来实现定时功能，Timer 的优点在于简单易用，但 由于所有任务都是由同一个线程来调度，因此所有任务都是串行执行的，同一时间只能有一个任务在执行，前一个 任务的延迟或异常都将会影响到之后的任务。
+
+  - 执行周期性定时任务
+
+    - ```java
+      public static ScheduledExecutorService newScheduledThreadPool(int corePoolSize) {
+          return new ScheduledThreadPoolExecutor(corePoolSize);
+      }
+      public ScheduledThreadPoolExecutor(int corePoolSize) {
+        super(corePoolSize, Integer.MAX_VALUE,
+              DEFAULT_KEEPALIVE_MILLIS, MILLISECONDS,
+              new DelayedWorkQueue());
+      }
+      ```
+
+# JUC
+
+## AQS（abstract queued synchronizer）
+
+- 阻塞式同步器框架
+
+- 特点：
+
+  - 用state属性来表示资源的状态（分独占模式和共享模式），子类需要定义如何维护这个状态，控制如何获取锁和释放锁
+    - getState - 获取state状态
+    - set State - 设置state状态（用CAS）
+  - 提供了FIFO的等待队列，而共享模式可以允许多个线程访问
+  - 条件变量来实现等待、唤醒机制，支持多个条件变量，类似于 Monitor 的 WaitSet
+
+- 子类主要实现这样一些方法(默认抛出 UnsupportedOperationException)
+
+  - tryAcquire 
+  - tryRelease 
+  - tryAcquireShared 
+  - tryReleaseShared 
+  - isHeldExclusively
+
+- 获取锁的姿势
+
+  - ```java
+     // 如果获取锁失败
+    if (!tryAcquire(arg)) {
+    // 入队, 可以选择阻塞当前线程 park unpark 
+    }
+    ```
+
+  - ```java
+     // 如果释放锁成功
+    if (tryRelease(arg)) {
+    // 让阻塞线程恢复运行 
+    }
+    ```
+
+    
+
+## Reentrant Lock
+
+### 与synchronize的区别
+
+- 可中断
+- 可以设置超时时间
+- 可以设置成公平锁
+- 支持多个条件变量
+
+### 原理
+
+#### 加锁流程（默认为非公平）
+
+- 没有竞争时
+  - 设置state为1，owner为当前线程
+  - ![image-20210312111434880](/Users/i531515/Library/Application Support/typora-user-images/image-20210312111434880.png)
+
+- 第一个竞争出现时
+
+  - ![image-20210312111551598](/Users/i531515/Library/Application Support/typora-user-images/image-20210312111551598.png)
+
+  - CAS尝试将state由0改成1，结果失败
+
+  - 进入try Acquire逻辑，这时state仍然是1，结果仍然是1
+
+  - 接下来进入addWaiter逻辑，构造node队列
+
+    - ![image-20210312111750780](/Users/i531515/Library/Application Support/typora-user-images/image-20210312111750780.png)
+
+    - 图中黄色表示该node的wait status状态，其中0位默认正常状态
+    - 第一个node为dummy，用来占位置
+
+  - 当前线程进入 acquireQueued 逻辑
+
+    - acquireQueued 会在一个死循环中不断尝试获得锁，失败后进入 park 阻塞
+    - 如果自己是紧邻着 head(排第二位)，那么再次 tryAcquire 尝试获取锁，当然这时 state 仍为 1，失败
+    - 进入 shouldParkAfterFailedAcquire 逻辑，将前驱 node，即 head 的 waitStatus 改为 -1，这次返回 false
+    - shouldParkAfterFailedAcquire 执行完毕回到 acquireQueued ，再次 tryAcquire 尝试获取锁，当然这时 state 仍为 1，失败
+    - 当再次进入 shouldParkAfterFailedAcquire 时，这时因为其前驱 node 的 waitStatus 已经是 -1，这次返回 true
+    - 进入 parkAndCheckInterrupt， Thread-1 park(灰色表示)
+
+  - Thread-0 释放锁，进入 tryRelease 流程，如果成功
+
+    - 设置 exclusiveOwnerThread 为 null
+    - state = 0
+      - ![image-20210312112513658](/Users/i531515/Library/Application Support/typora-user-images/image-20210312112513658.png)
+
+    - 当前队列不为 null，并且 head 的 waitStatus = -1，进入 unparkSuccessor 流程，找到队列中离 head 最近的一个 Node(没取消的)，unpark 恢复其运行，本例中即为 Thread-1 回到 Thread-1 的 acquireQueued 流程
+      - ![image-20210312112558365](/Users/i531515/Library/Application Support/typora-user-images/image-20210312112558365.png)
+      - 如果加锁成功（没有竞争），会设置
+        - owner为当前线程，state=1
+        - 删除node
+      - 如果这时候有其它线程来竞争(非公平的体现)，例如这时有 Thread-4 来了
+        - 如果不巧又被 Thread-4 占了先
+          - Thread-4 被设置为 exclusiveOwnerThread，state = 1
+          - Thread-1 再次进入 acquireQueued 流程，获取锁失败，重新进入 park 阻塞
+
+#### 可重入原理
+
+- 重入时set state++
+
+#### 条件变量实现原理
+
+- 每个条件变量其实就对应着一个等待队列，其实现类是 ConditionObject
