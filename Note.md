@@ -1241,3 +1241,97 @@ public ThreadPoolExecutor(int corePoolSize,
 #### 条件变量实现原理
 
 - 每个条件变量其实就对应着一个等待队列，其实现类是 ConditionObject
+
+## Reentrant Read Write Lock
+
+- 为什么要read write分开
+  - 当读操作远高于写操作时，这时候使用读写锁让读-读可以并发，提高性能
+- 读锁
+  - 读锁**不支持条件变量** **重入时升级不支持**:即持有读锁的情况下去获取写锁，会导致获取写锁永久等待
+- 写锁
+  - 重入**时降级支持**:即持有写锁的情况下去获取读锁
+
+### 原理
+
+- 读写锁用的是同一个syn同步器，因此等待队列、state也是同个
+
+- t1写锁**（状态为排他锁）**，t2读锁**（状态为shared）**
+
+- t1成功上锁，流程和reentrant lock没有区别，**state上有区别，高16位表示读锁，低16位表示写锁**，
+- t2执行读锁，这时进入读锁的sync.acquireShared(1)流程，首先会进入try Acquire Shared流程，如果有写锁占据，那么返回-1，表示失败
+  - try Acquire Shared返回值
+    - -1表示失败
+    - 0表示成功，但是后继节点不会被唤醒
+    - 正数表示成功，而且数值是还有几个后续节点要被唤醒，读写锁返回1
+  - ![image-20210312130753027](/Users/i531515/Library/Application Support/typora-user-images/image-20210312130753027.png)
+  - 因为t1已经加了写锁，所以失败，进入doAcuquireShare流程
+
+## StampedLock
+
+- 该类自 JDK 8 加入，是为了进一步优化读性能，它的特点是在使用读锁、写锁时都必须配合【戳】
+
+## Semaphore 原理
+
+- Semaphore 有点像一个停车场，permits 就好像停车位数量，当线程获得了 permits 就像是获得了停车位，然后 停车场显示空余车位减一
+
+## CountDownLatch & CycilBarrier
+
+### CountDownLatch
+
+- 用来进行线程同步协作，等待所有线程完成倒计时。 其中构造参数用来初始化等待计数值，await() 用来等待计数归零，countDown() 用来让计数减一
+- ountDownLatch这个类使一个线程等待其他线程各自执行完毕后再执行。是通过一个计数器来实现的，计数器的初始值是线程的数量。每当一个线程执行完毕后，计数器的值就-1，当计数器的值为0时，表示所有线程都执行完毕，然后在闭锁上等待的线程就可以恢复工作了。
+
+### CycilBarrier
+
+- 循环栅栏，用来进行线程协作，等待线程满足某个计数。构造时设置『计数个数』，每个线程执 行到某个需要“同步”的时刻调用 await() 方法进行等待，当等待的线程数满足『计数个数』时，继续执行
+- 它主要的方法就是一个：await()。await() 方法被调用一次，计数便会减少1，并阻塞住当前线程。当计数减至0时，阻塞解除，所有在此 CyclicBarrier 上面阻塞的线程开始运行。在这之后，如果再次调用 await() 方法，计数就又会变成 N-1，新一轮重新开始，这便是 Cyclic 的含义所在。CyclicBarrier.await() 方法带有返回值，用来表示当前线程是第几个到达这个 Barrier 的线程。
+
+### 区别
+
+- CountdownLatch 计数器只能使用一次，而CyclicBarrier的计数器可以使用reset()方法重置。
+- **CountdownLatch适用于所有线程通过某一点后通知方法,而CyclicBarrier则适合让所有线程在同一点同时执行**
+- CountdownLatch利用继承AQS的共享锁来进行线程的通知,利用CAS来进行,而CyclicBarrier则利用ReentrantLock的Condition来阻塞和通知线程
+- ![image-20210315114119578](/Users/i531515/Library/Application Support/typora-user-images/image-20210315114119578.png)
+
+## ThreadLocal
+
+ThreadLocal中填充的变量属于**当前**线程，该变量对其他线程而言是隔离的。其使用场景如下：
+
+**1、在进行对象跨层传递的时候，使用ThreadLocal可以避免多次传递，打破层次间的约束。**
+
+**2、线程间数据隔离。**
+
+**3、进行事务操作，用于存储线程事务信息。**
+
+**4、数据库连接，Session会话管理。**
+
+`ThreadLocal`类最重要的几个方法如下：
+
+```java
+//获取ThreadLocal的值
+public T get() { }
+//设置ThreadLocal的值
+public void set(T value) { }
+//删除ThreadLocal
+public void remove() { }
+//初始化ThreadLocal的值
+protected T initialValue() { }
+```
+
+### 原理
+
+- 首先，简单回顾一下，ThreadLocal是一个线程本地变量，每个线程维护自己的变量副本，多个线程互相不可见，因此多线程操作该变量不必加锁，适合不同线程使用不同变量值的场景。其**数据结构**是每个线程Thread类都有个属性ThreadLocalMap，用来维护该线程的多个ThreadLocal变量，该Map是自定义实现的Entry[]数组结构，并非继承自原生Map类，Entry其中Key即是ThreadLocal变量本身，Value则是具体该线程中的变量副本值。
+- ThreadLocalMap使用弱引用存储ThreadLocal
+  - 假如使用强引用，当ThreadLocal不再使用需要回收时，发现某个线程中ThreadLocalMap存在该ThreadLocal的强引用，无法回收，造成内存泄漏。
+  - ![img](https://pic2.zhimg.com/80/v2-e2d4b8eac152596232d3e32313927d59_720w.jpg)
+
+### ThreadLocal 内存泄漏的原因
+
+从上图中可以看出，hreadLocalMap使用ThreadLocal的弱引用作为key，如果一个ThreadLocal不存在外部**强引用**时，Key(ThreadLocal)势必会被GC回收，这样就会导致ThreadLocalMap中key为null， 而value还存在着强引用，只有thead线程退出以后,value的强引用链条才会断掉。
+
+但如果当前线程再迟迟不结束的话，这些key为null的Entry的value就会一直存在一条强引用链：
+
+> Thread Ref -> Thread -> ThreaLocalMap -> Entry -> value
+
+永远无法回收，造成内存泄漏。
+
